@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -42,9 +43,11 @@ func main() {
 		log.Fatalf("can't read serial number: %v", err)
 	}
 
-	sp := serialRegex.FindStringSubmatch(string(data))
+	data = bytes.TrimSpace(data)
 
-	slog.Info("got splits", "sp", sp)
+	slog.Debug("got serial number", "serial_number", string(data))
+
+	sp := serialRegex.FindStringSubmatch(string(data))
 
 	url := sp[2] + "meta-data"
 
@@ -68,21 +71,29 @@ func main() {
 		log.Fatal(err)
 	}
 
-	os.Remove("/etc/machine-id")
-	if err := os.WriteFile("/etc/machine-id", []byte(strings.ReplaceAll(metadata.InstanceID, "-", "")), 444); err != nil {
+	slog.Info("got waifud metadata, setting hostname", "meta", metadata)
+
+	if err := syscall.Sethostname([]byte(metadata.Hostname)); err != nil {
 		log.Fatal(err)
 	}
 
-	os.Remove("/etc/hostname")
-	if err := os.WriteFile("/etc/hostname", []byte(metadata.Hostname), 444); err != nil {
+	if err := os.WriteFile("./machine-id", []byte(strings.ReplaceAll(metadata.InstanceID, "-", "")), 444); err != nil {
 		log.Fatal(err)
 	}
-	if err := syscall.Sethostname([]byte(metadata.Hostname)); err != nil {
-		log.Fatal(err)
+
+	if err := syscall.Mount("/perm/home/waifud-gok-agent/machine-id", "/etc/machine-id", "", syscall.MS_BIND, ""); err != nil {
+		log.Fatalf("can't mount machine ID: %v", err)
 	}
 }
 
 type Metadata struct {
 	InstanceID string `yaml:"instance-id"`
-	Hostname   string `yaml:"hostname"`
+	Hostname   string `yaml:"local-hostname"`
+}
+
+func (md Metadata) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("instance_id", md.InstanceID),
+		slog.String("hostname", md.Hostname),
+	)
 }
